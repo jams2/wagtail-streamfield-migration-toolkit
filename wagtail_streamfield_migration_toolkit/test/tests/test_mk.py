@@ -90,138 +90,69 @@ def compound_block_diffo(old_block, new_block, path, out):
     )
 
 
-# def map_child_blocks(old_blocks, new_blocks, path, diff):
-#     return disj(
-#         nullo(old_blocks) & nullo(diff),
-#         fresh(
-#             lambda name, spec, rest_blocks, res, this_path, rest_new_blocks: conda(
-#                 # TODO: add case for added child
-#                 conj(
-#                     # new blocks is null, must have been removed
-#                     nullo(new_blocks),
-#                     conso((name, spec), rest_blocks, old_blocks),
-#                     joino(path, name, string("."), this_path),
-#                     conso((this_path, string("remove")), res, diff),
-#                     map_child_blocks(rest_blocks, new_blocks, path, res),
-#                 ),
-#                 conj(
-#                     # Try to map the old child block to a new child - this might fail
-#                     notnullo(new_blocks),
-#                     conso((name, spec), rest_blocks, old_blocks),
-#                     joino(path, name, string("."), this_path),
-#                     map_child_block(
-#                         name, spec, new_blocks, this_path, rest_new_blocks, diff
-#                     ),
-#                     map_child_blocks(rest_blocks, rest_new_blocks, path, diff),
-#                 ),
-#                 conj(
-#                     # Recursive case - couldn't map the block
-#                     notnullo(new_blocks),
-#                     conso((name, spec), rest_blocks, old_blocks),
-#                     joino(path, name, string("."), this_path),
-#                     conso((this_path, string("unmapped")), res, diff),
-#                     map_child_blocks(rest_blocks, new_blocks, path, res),
-#                 ),
-#             )
-#         ),
-#     )
-
-
 def map_child_blocks(old_blocks, new_blocks, path, diff):
-    return disj(
-        nullo(old_blocks) & nullo(diff),
-        fresh(
-            lambda name, spec, rest_blocks, rest_new_blocks, this_path, next_diff, child_diff: conj(
+    def _map_child_blocks(
+        name, spec, rest_old_blocks, rest_new_blocks, this_path, next_diff, child_diff
+    ):
+        return conda(
+            # old blocks null, new blocks null - done
+            nullo(old_blocks) & nullo(new_blocks) & nullo(diff),
+            # old blocks not null, new blocks null - old block removed
+            conj(
+                notnullo(old_blocks) & nullo(new_blocks),
+                conso((name, spec), rest_old_blocks, old_blocks),
                 joino(path, name, string("."), this_path),
-                conda(
-                    conj(
-                        # new_blocks is null, old block must have been removed
-                        nullo(new_blocks),
-                        conso((name, spec), rest_blocks, old_blocks),
-                        conso((this_path, string("remove")), next_diff, diff),
-                        map_child_blocks(rest_blocks, new_blocks, path, next_diff),
-                    ),
-                    conj(
-                        # Try to map the old child block to a new child - this might fail
-                        notnullo(new_blocks),
-                        conso((name, spec), rest_blocks, old_blocks),
-                        map_child_block(
-                            name,
-                            spec,
-                            new_blocks,
-                            this_path,
-                            rest_new_blocks,
-                            child_diff,
-                        ),
-                        conso(next_diff, child_diff, diff),
-                        map_child_blocks(rest_blocks, rest_new_blocks, path, next_diff),
-                    ),
-                    conj(
-                        # Must have added blocks
-                        nullo(old_blocks),
-                        notnullo(new_blocks),
-                        conso((name, spec), rest_new_blocks, new_blocks),
-                        conso((path, "add", name), next_diff, diff),
-                        map_child_blocks(old_blocks, rest_new_blocks, path, next_diff),
-                    ),
-                    conj(
-                        # Recursive case - couldn't map the block
-                        notnullo(new_blocks),
-                        conso((name, spec), rest_blocks, old_blocks),
-                        conso((this_path, string("unmapped")), next_diff, diff),
-                        map_child_blocks(rest_blocks, new_blocks, path, next_diff),
-                    ),
-                ),
+                conso((this_path, string("remove")), next_diff, diff),
+                map_child_blocks(rest_old_blocks, new_blocks, path, next_diff),
             ),
-        ),
-    )
+            # old blocks null, new blocks not null - new block added
+            conj(
+                nullo(old_blocks) & notnullo(new_blocks),
+                conso((name, spec), rest_new_blocks, new_blocks),
+                conso((path, string("add"), name), next_diff, diff),
+                map_child_blocks(old_blocks, rest_new_blocks, path, next_diff),
+            ),
+            # old blocks not null, new blocks not null - map old block to new block
+            conj(
+                notnullo(old_blocks) & notnullo(new_blocks),
+                conso((name, spec), rest_old_blocks, old_blocks),
+                conso(next_diff, child_diff, diff),
+                map_child_block(
+                    name, spec, new_blocks, path, rest_new_blocks, child_diff
+                ),
+                map_child_blocks(rest_old_blocks, rest_new_blocks, path, next_diff),
+            ),
+            conj(
+                notnullo(old_blocks) & notnullo(new_blocks),
+                joino(path, name, string("."), this_path),
+                conso((name, spec), rest_old_blocks, old_blocks),
+                conso((this_path, string("unmapped")), next_diff, diff),
+                map_child_blocks(rest_old_blocks, new_blocks, path, next_diff),
+            )
+        )
+
+    return fresh(_map_child_blocks)
 
 
 def map_child_block(name, spec, new_blocks, path, rest_new_blocks, diff):
     @goal
     def map_child_block_goal(state):
-        return disj(
-            nullo(new_blocks) & nullo(diff),
-            fresh(
-                lambda a, d, new_spec: disj(
-                    conj(
-                        # There is a block with the same name, maybe the spec changed
-                        rembero((name, new_spec), new_blocks, rest_new_blocks),
-                        neq(new_blocks, rest_new_blocks),
-                        same_blocko(spec, new_spec, path, diff),
-                    ),
-                    conj(
-                        # No block with the same name
-                        rembero((name, new_spec), new_blocks, new_blocks),
-                        map_child_block_by_value(name, spec, new_blocks, path, diff),
-                    ),
-                )
-            ),
+        return fresh(
+            lambda new_name, new_spec, next_diff, next_path: disj(
+                conj(
+                    # First block matches by name, spec may change
+                    conso((name, new_spec), rest_new_blocks, new_blocks),
+                    same_blocko(spec, new_spec, path, next_diff),
+                    conso(next_diff, Nil(), diff)
+                ),
+                conj(
+                    fail(),
+                    conso((new_name, new_spec), rest_new_blocks, new_blocks),
+                ),
+            )
         )(state)
 
     return map_child_block_goal
-
-
-def map_child_block_by_value(old_name, spec, new_blocks, path, diff):
-    # Don't do a disj with a nullo(new_blocks)&nullo(diff) clause, as
-    # in that case we've reached the end of the list of new_blocks so
-    # don't need to contribute further values
-    return fresh(
-        lambda new_name, new_spec, rest_new_blocks, res, _: conj(
-            # We want to compare by block spec only, not name
-            neq(old_name, new_name),
-            conso((new_name, new_spec), rest_new_blocks, new_blocks),
-            same_blocko(spec, new_spec, path, res),
-            disj(
-                conso((path, "rename", new_name), res, diff),
-                conj(
-                    map_child_block_by_value(
-                        old_name, spec, rest_new_blocks, path, diff
-                    ),
-                ),
-            ),
-        )
-    )
 
 
 def same_blocko(old_block_spec, new_block_spec, path, diff):
@@ -242,9 +173,9 @@ class TestMkCompare(SimpleTestCase):
     def test_second_block_from_diff(self):
         block_1 = blocks.CharBlock(required=True)
         _, args = deep_deconstruct(block_1)
-        changes = from_python([(string(""), "change_opt", "required", True, False)])
+        changes = from_python([(string("$"), "change_opt", "required", True, False)])
         result = run_all(
-            lambda q: spec_diffo(from_python(args), q, string(""), changes)
+            lambda q: spec_diffo(from_python(args), q, string("$"), changes)
         )
         self.assertEqual(len(result), 1)
         self.assertEqual(
@@ -263,12 +194,12 @@ class TestMkCompare(SimpleTestCase):
         _, args = deep_deconstruct(block_1)
         changes = from_python(
             [
-                ("", "change_opt", "required", False, True),
-                ("", "change_opt", "help_text", "foobar", None),
+                ("$", "change_opt", "required", False, True),
+                ("$", "change_opt", "help_text", "foobar", None),
             ]
         )
         result = run_all(
-            lambda q: spec_diffo(q, from_python(args), string(""), changes)
+            lambda q: spec_diffo(q, from_python(args), string("$"), changes)
         )
         self.assertEqual(len(result), 1)
         self.assertEqual(
@@ -287,19 +218,18 @@ class TestMkCompare(SimpleTestCase):
         block_2 = blocks.StreamBlock([])
         a = from_python(deep_deconstruct(block_1))
         b = from_python(deep_deconstruct(block_2))
-        result = run_all(lambda q: stream_block_diffo(a, b, string(""), q))
+        result = run_all(lambda q: stream_block_diffo(a, b, string("$"), q))
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], [("text", "remove")])
+        self.assertEqual(result[0], [("$.text", "remove")])
 
     def test_stream_child_added(self):
         block_1 = blocks.StreamBlock([])
         block_2 = blocks.StreamBlock([("text", blocks.CharBlock())])
         a = from_python(deep_deconstruct(block_1))
         b = from_python(deep_deconstruct(block_2))
-        result = run_all(lambda q: stream_block_diffo(a, b, string(""), q))
-        breakpoint()
+        result = run_all(lambda q: stream_block_diffo(a, b, string("$"), q))
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], [("text", "remove")])
+        self.assertEqual(result[0], [("$", "add", "text")])
 
     def test_stream_child_removed_when_multiple_child_blocks(self):
         block_1 = blocks.StreamBlock(
@@ -308,27 +238,28 @@ class TestMkCompare(SimpleTestCase):
         block_2 = blocks.StreamBlock([("number", blocks.IntegerBlock())])
         a = from_python(deep_deconstruct(block_1))
         b = from_python(deep_deconstruct(block_2))
-        result = run_all(lambda q: stream_block_diffo(a, b, string(""), q))
+        result = run_all(lambda q: stream_block_diffo(a, b, string("$"), q))
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], [("text", "remove")])
+        self.assertEqual(result[0], [("$.text", "remove")])
 
     def test_stream_child_spec_changed(self):
         block_1 = blocks.StreamBlock([("text", blocks.CharBlock())])
         block_2 = blocks.StreamBlock([("text", blocks.CharBlock(max_length=11))])
         a = from_python(deep_deconstruct(block_1))
         b = from_python(deep_deconstruct(block_2))
-        result = run_all(lambda q: stream_block_diffo(a, b, string(""), q))
+        result = run_all(lambda q: stream_block_diffo(a, b, string("$"), q))
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], [("text", "change_opt", "max_length", None, 11)])
+        self.assertEqual(result[0], [("$.text", "change_opt", "max_length", None, 11)])
 
     def test_stream_child_name_changed(self):
         block_1 = blocks.StreamBlock([("text", blocks.CharBlock())])
         block_2 = blocks.StreamBlock([("not_text", blocks.CharBlock())])
         a = from_python(deep_deconstruct(block_1))
         b = from_python(deep_deconstruct(block_2))
-        result = run_all(lambda q: stream_block_diffo(a, b, string(""), q))
+        result = run_all(lambda q: stream_block_diffo(a, b, string("$"), q))
+        breakpoint()
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], [("text", "rename", "not_text")])
+        self.assertEqual(result[0], [("$.text", "rename", "not_text")])
 
     def test_stream_child_name_and_spec_changed(self):
         block_1 = blocks.StreamBlock([("text", blocks.CharBlock())])
@@ -340,19 +271,19 @@ class TestMkCompare(SimpleTestCase):
         )
         a = from_python(deep_deconstruct(block_1))
         b = from_python(deep_deconstruct(block_2))
-        result = run_all(lambda q: stream_block_diffo(a, b, string(""), q))
+        result = run_all(lambda q: stream_block_diffo(a, b, string("$"), q))
         self.assertEqual(len(result), 2)
         self.assertEqual(
             result,
             [
                 [
-                    ("text", "rename", "not_text"),
-                    ("text", "change_opt", "required", True, False),
-                    ("text", "change_opt", "max_length", None, 1),
+                    ("$.text", "rename", "not_text"),
+                    ("$.text", "change_opt", "required", True, False),
+                    ("$.text", "change_opt", "max_length", None, 1),
                 ],
                 [
-                    ("text", "rename", "really_not_text"),
-                    ("text", "change_opt", "min_length", None, 12),
+                    ("$.text", "rename", "really_not_text"),
+                    ("$.text", "change_opt", "min_length", None, 12),
                 ],
             ],
         )
@@ -364,18 +295,18 @@ class TestMkCompare(SimpleTestCase):
         block_2 = blocks.StreamBlock([("inner_stream", inner_stream_2)])
         a = from_python(deep_deconstruct(block_1))
         b = from_python(deep_deconstruct(block_2))
-        result = run_all(lambda q: stream_block_diffo(a, b, string(""), q))
+        result = run_all(lambda q: stream_block_diffo(a, b, string("$"), q))
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], [("inner_stream.text", "rename", "not_text")])
+        self.assertEqual(result[0], [("$.inner_stream.text", "rename", "not_text")])
 
     def test_different_block_types_fails(self):
         block_1 = blocks.StreamBlock([("text", blocks.CharBlock())])
         block_2 = blocks.StreamBlock([("not_text", blocks.IntegerBlock())])
         a = from_python(deep_deconstruct(block_1))
         b = from_python(deep_deconstruct(block_2))
-        result = run_all(lambda q: stream_block_diffo(a, b, string(""), q))
+        result = run_all(lambda q: stream_block_diffo(a, b, string("$"), q))
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], [("text", "unmapped")])
+        self.assertEqual(result[0], [("$.text", "unmapped")])
 
     def test_struct_block(self):
         struct_1 = blocks.StructBlock([("number", blocks.IntegerBlock())])
@@ -386,13 +317,13 @@ class TestMkCompare(SimpleTestCase):
         block_2 = blocks.StreamBlock([("struct", struct_2)])
         a = from_python(deep_deconstruct(block_1))
         b = from_python(deep_deconstruct(block_2))
-        result = run_all(lambda q: stream_block_diffo(a, b, string(""), q))
+        result = run_all(lambda q: stream_block_diffo(a, b, string("$"), q))
         # breakpoint()
         self.assertEqual(len(result), 1)
         self.assertEqual(
             result[0],
             [
-                ("struct.number", "rename", "more_number"),
-                ("struct.number", "change_opt", "min_value", None, 11),
+                ("$.struct.number", "rename", "more_number"),
+                ("$.struct.number", "change_opt", "min_value", None, 11),
             ],
         )
