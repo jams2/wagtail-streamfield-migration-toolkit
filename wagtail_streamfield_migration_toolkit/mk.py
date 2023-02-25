@@ -494,9 +494,9 @@ def call_with_empty_state(g: Goal) -> Stream:
 
 
 def run(n: int, f_fresh_vars: Callable[[Var, ...], Goal]):
-    n = f_fresh_vars.__code__.co_argcount
-    fresh_vars = (Var(i) for i in range(n))
-    state = State([], [], n)
+    n_vars = f_fresh_vars.__code__.co_argcount
+    fresh_vars = (Var(i) for i in range(n_vars))
+    state = State([], [], n_vars)
     return reify(take(n, f_fresh_vars(*fresh_vars)(state)))
 
 
@@ -505,6 +505,27 @@ def run_all(f_fresh_vars: Callable[[Var, ...], Goal]):
     fresh_vars = (Var(i) for i in range(n))
     state = State([], [], n)
     return reify(take_all(f_fresh_vars(*fresh_vars)(state)))
+
+
+def mk_debug(_goal: Goal) -> Goal:
+    def _orchestrated(state: State) -> Stream:
+        if hasattr(_goal, "f"):
+            f = _goal.f
+        elif hasattr(_goal, "__code__"):
+            f = _goal
+        else:
+            raise ValueError(f"Expected function or Goal, got {type(goal)}")
+
+        resolved = {}
+        for i, name in enumerate(f.__code__.co_cellvars):
+            resolved[name] = to_python(walk_all(f.__closure__[i].cell_contents))
+        import pdb
+
+        return pdb.runeval(
+            "_goal(state)", {**globals(), "_resolved": resolved}, locals()
+        )
+
+    return _orchestrated
 
 
 def appendo(xs: Cons | Var, ys: Cons | Var, zs: Cons | Var) -> Goal:

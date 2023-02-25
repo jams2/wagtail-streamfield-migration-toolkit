@@ -7,6 +7,12 @@ def get_normalised_arguments(obj):
     return signature.bind(*args, **kwargs).arguments
 
 
+def deconstruct_with_normalised_args(obj):
+    signature = inspect.Signature.from_callable(obj.__init__)
+    klass, args, kwargs = obj.deconstruct()
+    return klass, signature.bind(*args, **kwargs).arguments
+
+
 def deep_deconstruct(obj):
     if isinstance(obj, list):
         return [deep_deconstruct(x) for x in obj]
@@ -22,7 +28,7 @@ def deep_deconstruct(obj):
     deconstructed_kwargs = {
         k: deep_deconstruct(v)
         for k, v in kwargs.items()
-        if v is not inspect.Parameter.empty
+        # if v is not inspect.Parameter.empty
     }
     signature = inspect.Signature.from_callable(obj.__init__)
     defaults = {
@@ -34,9 +40,3 @@ def deep_deconstruct(obj):
     extras = bound.pop("kwargs", {})
     flat_bound = {**bound, **extras}
     return klass, {**defaults, **flat_bound}
-
-
-def deconstruct_with_normalised_args(obj):
-    signature = inspect.Signature.from_callable(obj.__init__)
-    klass, args, kwargs = obj.deconstruct()
-    return klass, signature.bind(*args, **kwargs).arguments
